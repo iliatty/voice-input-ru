@@ -2,6 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+set "PYTHONPATH=%CD%\vendor"
 
 where python >nul 2>nul
 if errorlevel 1 (
@@ -30,7 +31,7 @@ if not exist "models\vosk-model-small-ru-0.22\am" (
     )
 )
 
-set "PYTHONPATH=%CD%\.buildtools"
+set "PYTHONPATH=%CD%\vendor;%CD%\.buildtools"
 python -m PyInstaller --noconfirm --clean --windowed --name VoiceInputRU ^
     --icon assets\app.ico ^
     --add-data "assets;assets" ^
