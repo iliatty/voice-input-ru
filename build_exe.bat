@@ -21,7 +21,7 @@ if not exist ".buildtools\PyInstaller" (
     )
 )
 
-if not exist "models\vosk-model-small-ru-0.22\am" (
+if not exist "models\faster-whisper-small\model.bin" (
     echo Модель не найдена, скачиваю...
     python tools\download_model.py
     if errorlevel 1 (
@@ -35,10 +35,15 @@ set "PYTHONPATH=%CD%\vendor;%CD%\.buildtools"
 python -m PyInstaller --noconfirm --clean --windowed --name VoiceInputRU ^
     --icon assets\app.ico ^
     --add-data "assets;assets" ^
-    --add-data "vendor\vosk;vosk" ^
+    --add-data "vendor\faster_whisper\assets;faster_whisper\assets" ^
     --paths vendor ^
-    --hidden-import vosk ^
-    --hidden-import vosk.vosk_cffi ^
+    --hidden-import faster_whisper ^
+    --collect-all faster_whisper ^
+    --hidden-import ctranslate2 ^
+    --hidden-import av ^
+    --hidden-import tokenizers ^
+    --collect-all ctranslate2 ^
+    --collect-all onnxruntime ^
     --hidden-import win32gui ^
     --hidden-import win32con ^
     --hidden-import win32api ^
@@ -63,7 +68,7 @@ if errorlevel 1 (
 )
 
 if not exist "dist\VoiceInputRU\models" mkdir "dist\VoiceInputRU\models"
-robocopy "models\vosk-model-small-ru-0.22" "dist\VoiceInputRU\models\vosk-model-small-ru-0.22" /E /NFL /NDL /NJH /NJS /NP >nul
+robocopy "models\faster-whisper-small" "dist\VoiceInputRU\models\faster-whisper-small" /E /NFL /NDL /NJH /NJS /NP >nul
 robocopy "docs" "dist\VoiceInputRU\docs" /E /NFL /NDL /NJH /NJS /NP >nul
 copy /Y "README.md" "dist\VoiceInputRU\README.md" >nul
 copy /Y "uninstall.bat" "dist\VoiceInputRU\uninstall.bat" >nul

@@ -238,7 +238,7 @@ class VoiceInputApp:
         ).pack(side="left")
         self.model_hint = tk.Label(
             head,
-            text="Vosk Small RU · офлайн",
+            text="Whisper Small · офлайн",
             bg=SURFACE,
             fg=MUTED,
             font=(FONT, 8),
@@ -397,7 +397,7 @@ class VoiceInputApp:
         self.model_bar_label.pack(side="left", padx=10, pady=8)
         self.download_button = ttk.Button(
             self.model_bar,
-            text="Скачать 46 МБ",
+            text="Скачать 486 МБ",
             style="Link.TButton",
             command=self._download_model,
         )
@@ -754,7 +754,7 @@ class VoiceInputApp:
             self._show_model_missing()
             return
         self.model_path = path
-        self.model_hint.configure(text="Vosk Small RU · офлайн")
+        self.model_hint.configure(text="Whisper Small · офлайн")
         self.status_badge.set("Загрузка модели…", AMBER)
         self.footer_label.configure(text=f"Модель: {path}")
         self._set_record_mode("loading")
@@ -781,7 +781,7 @@ class VoiceInputApp:
         if self._model_bar_visible:
             self.model_bar.grid_remove()
             self._model_bar_visible = False
-        self.model_hint.configure(text="Vosk Small RU · офлайн", fg=MUTED)
+        self.model_hint.configure(text="Whisper Small · офлайн", fg=MUTED)
 
     def _on_model_ready(self, model) -> None:
         self.model = model
@@ -804,7 +804,7 @@ class VoiceInputApp:
         self._show_model_missing()
         messagebox.showerror(
             "Модель распознавания",
-            "Не удалось загрузить модель Vosk.\n\n"
+            "Не удалось загрузить модель Whisper.\n\n"
             f"{error}\n\n"
             "Можно скачать модель заново или указать папку вручную.",
             parent=self.root,
@@ -821,7 +821,7 @@ class VoiceInputApp:
             lambda path: self._post("download_ready", path),
             lambda error: self._post("download_error", error),
         )
-        self.footer_label.configure(text="Скачивание модели Vosk (46 МБ)…")
+        self.footer_label.configure(text="Скачивание модели Whisper (486 МБ)…")
 
     def _on_download_progress(self, percent: int, text: str) -> None:
         self.model_progress["value"] = max(0, min(100, percent))
@@ -852,7 +852,7 @@ class VoiceInputApp:
     def _browse_model(self) -> None:
         selected = filedialog.askdirectory(
             parent=self.root,
-            title="Выберите папку модели vosk-model-small-ru-0.22",
+            title=f"Выберите папку модели {MODEL_FOLDER_NAME}",
         )
         if not selected:
             return
@@ -862,8 +862,9 @@ class VoiceInputApp:
         if not model_is_valid(path):
             messagebox.showerror(
                 "Модель",
-                "В выбранной папке нет модели Vosk.\n\n"
-                "Выберите папку, внутри которой есть am, conf, graph и ivector.",
+                "В выбранной папке нет модели Whisper.\n\n"
+                "Выберите папку, внутри которой есть model.bin, config.json, "
+                "tokenizer.json и vocabulary.txt.",
                 parent=self.root,
             )
             return
@@ -946,7 +947,7 @@ class VoiceInputApp:
         self._set_record_mode("busy")
         self.overlay.show_processing()
         self.recorder.stop()
-        self._watchdog_job = self.root.after(12000, self._recognition_timeout)
+        self._watchdog_job = self.root.after(120000, self._recognition_timeout)
 
     def _check_duration(self) -> None:
         self._duration_job = None

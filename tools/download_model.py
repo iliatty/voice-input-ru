@@ -1,66 +1,68 @@
-"""Скачивает русскую модель Vosk в models/ для сборки или запуска из исходников."""
+"""Скачивает русскую модель faster-whisper small в models/."""
 from __future__ import annotations
 
 import shutil
 import sys
-import zipfile
 from pathlib import Path
 
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL = "vosk-model-small-ru-0.22"
-URLS = (
-    "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-ru-0.22.zip",
-    "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip",
+MODEL = "faster-whisper-small"
+BASES = (
+    "https://huggingface.co/Systran/faster-whisper-small/resolve/main/",
+    "https://hf-mirror.com/Systran/faster-whisper-small/resolve/main/",
 )
+FILES = {
+    "config.json": 2_370,
+    "model.bin": 483_546_902,
+    "tokenizer.json": 2_203_239,
+    "vocabulary.txt": 459_861,
+}
 
 
 def main() -> int:
     target = ROOT / "models" / MODEL
-    if (target / "am").is_dir():
+    if (target / "model.bin").is_file():
         print(f"Модель уже есть: {target}")
         return 0
 
-    models = ROOT / "models"
-    models.mkdir(parents=True, exist_ok=True)
-    archive = models / f"{MODEL}.zip.part"
-    extract = models / "_extract"
-
-    for url in URLS:
+    temp = ROOT / "models" / f"_{MODEL}-download"
+    if temp.exists():
+        shutil.rmtree(temp, ignore_errors=True)
+    temp.mkdir(parents=True, exist_ok=True)
+    total = sum(FILES.values())
+    done = 0
+    for base in BASES:
         try:
-            print(f"Скачивание: {url}")
-            with requests.get(url, stream=True, timeout=(20, 180)) as response:
-                response.raise_for_status()
-                total = int(response.headers.get("content-length") or 46_236_750)
-                done = 0
-                with archive.open("wb") as file:
-                    for chunk in response.iter_content(1024 * 256):
-                        if not chunk:
-                            continue
-                        file.write(chunk)
-                        done += len(chunk)
-                        percent = int(done * 100 / total)
-                        if percent % 5 == 0:
-                            print(f"\r{percent:3d}%  {done // (1024 * 1024)} МБ", end="")
-            print()
-            if extract.exists():
-                shutil.rmtree(extract, ignore_errors=True)
-            with zipfile.ZipFile(archive) as zf:
-                zf.extractall(extract)
-            source = extract / MODEL
-            if not (source / "am").is_dir():
-                raise RuntimeError("в архиве нет ожидаемой модели")
+            for name, expected in FILES.items():
+                print(f"\n{name} ...", end="", flush=True)
+                part = temp / f"{name}.part"
+                with requests.get(base + name, stream=True, timeout=(30, 240)) as response:
+                    response.raise_for_status()
+                    with part.open("wb") as file:
+                        for chunk in response.iter_content(1024 * 512):
+                            if not chunk:
+                                continue
+                            file.write(chunk)
+                            done += len(chunk)
+                            if done % (1024 * 1024) < 512 * 1024:
+                                print(f"\r{int(done * 100 / total):3d}%", end="", flush=True)
+                if part.stat().st_size < expected * 0.95:
+                    raise RuntimeError(f"{name} скачался не полностью")
+                part.replace(temp / name)
+            if not (temp / "model.bin").is_file():
+                raise RuntimeError("нет model.bin")
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
-            shutil.move(str(source), str(target))
-            shutil.rmtree(extract, ignore_errors=True)
-            archive.unlink(missing_ok=True)
-            print(f"Готово: {target}")
+            shutil.move(str(temp), str(target))
+            print(f"\nГотово: {target}")
             return 0
         except Exception as exc:
             print(f"\nНе удалось: {exc}")
-            archive.unlink(missing_ok=True)
+            for child in temp.iterdir():
+                if child.is_file():
+                    child.unlink(missing_ok=True)
 
     print("Не удалось скачать модель. Проверьте интернет.")
     return 1

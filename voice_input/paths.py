@@ -10,8 +10,8 @@ from pathlib import Path
 
 APP_NAME = "VoiceInputRU"
 APP_TITLE = "Голосовой ввод"
-VERSION = "1.1.0"
-MODEL_FOLDER_NAME = "vosk-model-small-ru-0.22"
+VERSION = "1.2.0"
+MODEL_FOLDER_NAME = "faster-whisper-small"
 
 
 def is_frozen() -> bool:
@@ -73,8 +73,14 @@ def model_is_valid(path: Path | str | None) -> bool:
     if not path:
         return False
     root = Path(path)
-    required = ("am", "conf", "graph", "ivector")
-    return root.is_dir() and all((root / item).is_dir() for item in required)
+    if not root.is_dir():
+        return False
+    return (
+        (root / "model.bin").is_file()
+        and (root / "config.json").is_file()
+        and (root / "tokenizer.json").is_file()
+        and (root / "vocabulary.txt").is_file()
+    )
 
 
 def find_model_dir(preferred: str | Path | None = None) -> Path | None:

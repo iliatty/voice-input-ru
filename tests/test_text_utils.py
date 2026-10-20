@@ -36,6 +36,19 @@ class FormatTranscriptTests(unittest.TestCase):
     def test_final_tochka_command(self) -> None:
         self.assertEqual(format_transcript("привет точка"), "Привет.")
 
+    def test_whisper_punctuation_preserved(self) -> None:
+        self.assertEqual(
+            format_transcript("Привет. Это проверка распознавания."),
+            "Привет. Это проверка распознавания.",
+        )
+
+    def test_command_with_existing_punctuation(self) -> None:
+        self.assertEqual(
+            format_transcript("Привет, запятая, как дела?"),
+            "Привет, как дела?",
+        )
+        self.assertEqual(format_transcript("Привет точка."), "Привет.")
+
     def test_dash(self) -> None:
         self.assertEqual(format_transcript("привет тире мир"), "Привет — мир.")
 

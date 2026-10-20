@@ -1,11 +1,10 @@
-"""Загрузка офлайн-модели Vosk и её скачивание при необходимости."""
+"""Загрузка офлайн-модели faster-whisper и её скачивание при необходимости."""
 from __future__ import annotations
 
 import logging
 import os
 import shutil
 import threading
-import zipfile
 from pathlib import Path
 from typing import Callable
 
@@ -15,11 +14,17 @@ from .paths import MODEL_FOLDER_NAME, model_install_dir, model_is_valid
 
 log = logging.getLogger(__name__)
 
-MODEL_URLS = (
-    "https://huggingface.co/localstack/vosk-models/resolve/main/vosk-model-small-ru-0.22.zip",
-    "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip",
+MODEL_BASES = (
+    "https://huggingface.co/Systran/faster-whisper-small/resolve/main/",
+    "https://hf-mirror.com/Systran/faster-whisper-small/resolve/main/",
 )
-MODEL_SIZE = 46_236_750
+MODEL_FILES: tuple[tuple[str, int], ...] = (
+    ("config.json", 2_370),
+    ("model.bin", 483_546_902),
+    ("tokenizer.json", 2_203_239),
+    ("vocabulary.txt", 459_861),
+)
+MODEL_SIZE = sum(size for _, size in MODEL_FILES)
 
 
 def load_model_async(
@@ -29,38 +34,33 @@ def load_model_async(
 ) -> None:
     def worker() -> None:
         try:
-            import vosk
+            from faster_whisper import WhisperModel
 
-            vosk.SetLogLevel(-1)
-            log.info("Загрузка модели Vosk: %s", model_path)
-            # Vosk (C++ слой) не открывает абсолютные пути с кириллицей.
-            # Открываем модель как "." из её папки — это надёжно и для
-            # путей вида C:\Users\Иван\...
+            log.info("Загрузка модели Whisper: %s", model_path)
+            # CTranslate2, как и Vosk, не любит абсолютные пути с кириллицей.
+            # Открываем модель из её папки, а затем возвращаем рабочий каталог.
             previous = os.getcwd()
             try:
                 os.chdir(model_path)
-                model = vosk.Model(".")
+                model = WhisperModel(
+                    ".",
+                    device="cpu",
+                    compute_type="int8",
+                    cpu_threads=max(4, min(8, os.cpu_count() or 4)),
+                    num_workers=1,
+                )
             finally:
                 try:
                     os.chdir(previous)
                 except OSError:
                     pass
-            log.info("Модель загружена")
+            log.info("Модель Whisper загружена")
             on_ready(model)
         except Exception as exc:
-            log.exception("Не удалось загрузить модель")
+            log.exception("Не удалось загрузить модель Whisper")
             on_error(str(exc))
 
     threading.Thread(target=worker, name="model-loader", daemon=True).start()
-
-
-def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
-    destination = destination.resolve()
-    for member in archive.infolist():
-        target = (destination / member.filename).resolve()
-        if destination not in target.parents and target != destination:
-            raise ValueError("Архив содержит недопустимый путь")
-    archive.extractall(destination)
 
 
 def download_model_async(
@@ -70,70 +70,79 @@ def download_model_async(
 ) -> None:
     def worker() -> None:
         target_root = model_install_dir()
-        archive_path = target_root / f"{MODEL_FOLDER_NAME}.zip.part"
-        extract_dir = target_root / "_extract"
+        destination = target_root / MODEL_FOLDER_NAME
+        temp = target_root / f"_{MODEL_FOLDER_NAME}-download"
         errors: list[str] = []
         try:
-            for url in MODEL_URLS:
+            if model_is_valid(destination):
+                on_ready(destination)
+                return
+            if temp.exists():
+                shutil.rmtree(temp, ignore_errors=True)
+            temp.mkdir(parents=True, exist_ok=True)
+            for base in MODEL_BASES:
                 try:
-                    on_progress(0, "Скачивание модели…")
-                    log.info("Скачивание модели: %s", url)
-                    _download(url, archive_path, on_progress)
-                    on_progress(100, "Распаковка модели…")
-                    if extract_dir.exists():
-                        shutil.rmtree(extract_dir, ignore_errors=True)
-                    with zipfile.ZipFile(archive_path) as archive:
-                        _safe_extract(archive, extract_dir)
-                    source = extract_dir / MODEL_FOLDER_NAME
-                    if not model_is_valid(source):
-                        raise ValueError("В архиве нет ожидаемой модели")
-                    destination = target_root / MODEL_FOLDER_NAME
+                    _download_all(base, temp, on_progress)
+                    if not model_is_valid(temp):
+                        raise ValueError("Файлы модели скачались не полностью")
                     if destination.exists():
                         shutil.rmtree(destination, ignore_errors=True)
-                    shutil.move(str(source), str(destination))
-                    shutil.rmtree(extract_dir, ignore_errors=True)
-                    archive_path.unlink(missing_ok=True)
-                    if not model_is_valid(destination):
-                        raise ValueError("Модель распаковалась не полностью")
+                    shutil.move(str(temp), str(destination))
                     on_ready(destination)
                     return
                 except Exception as exc:
-                    log.exception("Не удалось скачать модель с %s", url)
+                    log.exception("Не удалось скачать модель Whisper с %s", base)
                     errors.append(str(exc))
-                    archive_path.unlink(missing_ok=True)
+                    for child in temp.iterdir():
+                        try:
+                            if child.is_file():
+                                child.unlink()
+                        except OSError:
+                            pass
             on_error(
-                "Не удалось скачать модель.\n"
-                "Проверьте подключение к интернету или скачайте модель вручную.\n\n"
+                "Не удалось скачать модель Whisper.\n"
+                "Проверьте интернет или скачайте папку faster-whisper-small вручную.\n\n"
                 + (errors[-1] if errors else "")
             )
         except Exception as exc:
-            log.exception("Ошибка скачивания модели")
+            log.exception("Ошибка загрузки модели Whisper")
             on_error(str(exc))
 
     threading.Thread(target=worker, name="model-downloader", daemon=True).start()
 
 
-def _download(
-    url: str,
+def _download_all(
+    base: str,
     destination: Path,
     on_progress: Callable[[int, str], None],
 ) -> None:
-    with requests.get(url, stream=True, timeout=(20, 120)) as response:
-        response.raise_for_status()
-        total = int(response.headers.get("content-length") or MODEL_SIZE)
-        downloaded = 0
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("wb") as file:
-            for chunk in response.iter_content(chunk_size=1024 * 256):
-                if not chunk:
-                    continue
-                file.write(chunk)
-                downloaded += len(chunk)
-                percent = int(downloaded * 100 / max(1, total))
-                if percent % 2 == 0:
-                    on_progress(
-                        min(99, percent),
-                        f"Скачивание модели… {downloaded // (1024 * 1024)} МБ",
-                    )
-    if destination.stat().st_size < 1_000_000:
-        raise ValueError("Файл модели слишком маленький")
+    downloaded = 0
+    for filename, expected_size in MODEL_FILES:
+        on_progress(
+            int(downloaded * 100 / MODEL_SIZE),
+            f"Скачивание модели… {downloaded // (1024 * 1024)} МБ",
+        )
+        path = destination / filename
+        part = destination / f"{filename}.part"
+        with requests.get(
+            base + filename,
+            stream=True,
+            timeout=(30, 240),
+        ) as response:
+            response.raise_for_status()
+            with part.open("wb") as file:
+                for chunk in response.iter_content(chunk_size=1024 * 512):
+                    if not chunk:
+                        continue
+                    file.write(chunk)
+                    downloaded += len(chunk)
+                    percent = min(99, int(downloaded * 100 / MODEL_SIZE))
+                    if percent % 2 == 0:
+                        on_progress(
+                            percent,
+                            f"Скачивание модели… {downloaded // (1024 * 1024)} МБ",
+                        )
+        if part.stat().st_size < expected_size * 0.95:
+            raise ValueError(f"Файл {filename} скачался не полностью")
+        os.replace(part, path)
+    on_progress(100, "Модель скачана")

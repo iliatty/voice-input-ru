@@ -1,7 +1,6 @@
-"""Запись с микрофона и потоковое распознавание Vosk."""
+"""Запись с микрофона и распознавание через faster-whisper."""
 from __future__ import annotations
 
-import json
 import logging
 import queue
 import threading
@@ -10,7 +9,6 @@ from typing import Callable
 
 import numpy as np
 import sounddevice as sd
-import vosk
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +78,6 @@ def resolve_device(key: str) -> AudioDevice | None:
     for device in devices:
         if device.key == key:
             return device
-    # Старый/неточный ключ: ищем хотя бы по имени.
     name = key.split("|", 1)[0]
     for device in devices:
         if device.name == name:
@@ -136,11 +133,11 @@ class _StreamingResampler:
 
 
 class Recorder:
-    """Одна сессия записи: поток -> Vosk -> partial/final."""
+    """Одна сессия записи: PCM в память, затем batch-распознавание Whisper."""
 
     def __init__(
         self,
-        model: vosk.Model,
+        model,
         *,
         on_partial: Callable[[str], None],
         on_final: Callable[[str], None],
@@ -158,8 +155,6 @@ class Recorder:
         self._running = False
         self._discard = False
         self._samplerate = TARGET_SAMPLE_RATE
-        self._last_partial = ""
-        self._lock = threading.Lock()
 
     @property
     def running(self) -> bool:
@@ -188,7 +183,6 @@ class Recorder:
 
         self._samplerate = samplerate
         self._discard = False
-        self._last_partial = ""
         self._queue = queue.Queue()
         self._running = True
 
@@ -227,17 +221,11 @@ class Recorder:
             daemon=True,
         )
         self._thread.start()
-        log.info(
-            "Запись начата: %s (%s Гц) -> Vosk %s Гц",
-            device.label,
-            samplerate,
-            TARGET_SAMPLE_RATE,
-        )
+        log.info("Запись начата: %s (%s Гц) -> Whisper 16 кГц", device.label, samplerate)
         return True
 
     def _worker(self) -> None:
-        recognizer = vosk.KaldiRecognizer(self.model, TARGET_SAMPLE_RATE)
-        parts: list[str] = []
+        chunks: list[np.ndarray] = []
         resampler = _StreamingResampler(self._samplerate)
         try:
             while True:
@@ -250,30 +238,39 @@ class Recorder:
                 if samples.size:
                     rms = float(np.sqrt(np.mean((samples.astype(np.float32) / 32768.0) ** 2)))
                     self.on_level(min(1.0, rms * 10.0))
-
                 samples = resampler.process(samples)
-                if samples.size == 0:
-                    continue
-                if recognizer.AcceptWaveform(samples.tobytes()):
-                    segment = str(json.loads(recognizer.Result()).get("text", "")).strip()
-                    if segment:
-                        parts.append(segment)
-                partial = str(
-                    json.loads(recognizer.PartialResult()).get("partial", "")
-                ).strip()
-                combined = " ".join(parts + ([partial] if partial else [])).strip()
-                if combined != self._last_partial:
-                    self._last_partial = combined
-                    self.on_partial(combined)
+                if samples.size:
+                    chunks.append(samples.copy())
 
-            final = str(json.loads(recognizer.FinalResult()).get("text", "")).strip()
-            if final:
-                parts.append(final)
-            text = " ".join(parts).strip()
             if self._discard:
                 log.info("Распознавание отменено пользователем")
-            else:
-                self.on_final(text)
+                return
+            if not chunks:
+                self.on_final("")
+                return
+
+            audio = np.concatenate(chunks).astype(np.float32) / 32768.0
+            duration = len(audio) / TARGET_SAMPLE_RATE
+            rms = float(np.sqrt(np.mean(audio**2))) if audio.size else 0.0
+            if duration < 0.25 or rms < 0.0015:
+                log.info("Слишком тихая или короткая запись (%.2f с, RMS %.4f)", duration, rms)
+                self.on_final("")
+                return
+
+            log.info("Распознавание Whisper: %.1f с аудио", duration)
+            segments, _info = self.model.transcribe(
+                audio,
+                language="ru",
+                task="transcribe",
+                beam_size=5,
+                best_of=5,
+                temperature=0.0,
+                condition_on_previous_text=False,
+                without_timestamps=True,
+                vad_filter=True,
+            )
+            text = " ".join(segment.text.strip() for segment in segments).strip()
+            self.on_final(text)
         except Exception as exc:
             log.exception("Ошибка распознавания")
             if not self._discard:

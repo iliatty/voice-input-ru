@@ -1,4 +1,4 @@
-"""Приведение текста Vosk к аккуратному виду и голосовые команды пунктуации."""
+"""Приведение текста распознавания к аккуратному виду и команды пунктуации."""
 from __future__ import annotations
 
 import re
@@ -34,7 +34,13 @@ def apply_voice_commands(text: str) -> str:
     for pattern, replacement in _COMMANDS:
         result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
     # «точка» как команда — только если это последнее слово фразы.
-    result = re.sub(r"(^|\s)точка\s*$", ".", result, flags=re.IGNORECASE)
+    # Whisper может добавить свою точку после слова-команды.
+    result = re.sub(
+        r"(^|\s)точка\s*[.!?]?\s*$",
+        ".",
+        result,
+        flags=re.IGNORECASE,
+    )
     return result
 
 
@@ -49,6 +55,10 @@ def _normalize_spaces(text: str) -> str:
     text = re.sub(r"([,.;:?!])(?=[^\s\n,.;:?!»)\]])", r"\1 ", text)
     # Тире с пробелами с обеих сторон.
     text = re.sub(r"\s*—\s*", " — ", text)
+    # Whisper мог уже поставить знак рядом со словом-командой.
+    text = re.sub(r"([,;:])\s*\1+", r"\1", text)
+    text = re.sub(r"[,;:]\s*([.!?])", r"\1", text)
+    text = re.sub(r"([.!?])\s*[,;:]+", r"\1", text)
     text = re.sub(r"([«\"'(\[])\s+", r"\1", text)
     text = re.sub(r"\s+([»\"')\]])", r"\1", text)
     return text.strip()
@@ -69,8 +79,8 @@ def format_transcript(
 ) -> str:
     """Форматирует сырой текст распознавания.
 
-    Vosk отдаёт строчные слова без знаков препинания. Мы капитализируем
-    предложения, расставляем пробелы и при необходимости добавляем точку.
+    Whisper уже расставляет знаки, но мы дополнительно капитализируем
+    предложения, наводим порядок в пробелах и при необходимости добавляем точку.
     """
     text = (raw or "").strip()
     if not text:

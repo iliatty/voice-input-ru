@@ -31,3 +31,5 @@ Thumbs.db
 
 # Local scratch scripts
 tmp_*.py
+
+tmp/
