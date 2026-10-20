@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Local dependencies and build tools
+vendor/
+.buildtools/
+build/
+dist/
+*.spec
+
+# Offline model is downloaded separately (too large for git)
+models/
+
+# Release archives
+*.zip
+
+# Local settings, logs, learned corrections
+data/
+learning.json
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local scratch scripts
+tmp_*.py
