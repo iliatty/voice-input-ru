@@ -686,23 +686,31 @@ class VoiceInputApp:
     # --------------------------------------------------------------- hotkey
 
     def _register_hotkey_initial(self) -> None:
-        try:
-            self.hotkey.register(self.config.hotkey)
-        except Exception as exc:
-            log.warning("Не удалось зарегистрировать %s: %s", self.config.hotkey, exc)
+        candidates: list[str] = []
+        for combo in (self.config.hotkey, DEFAULT_HOTKEY, "ctrl+alt+f9", "ctrl+shift+f9"):
+            if combo and combo not in candidates:
+                candidates.append(combo)
+        last_error: Exception | None = None
+        for index, combo in enumerate(candidates):
             try:
-                self.hotkey.register(DEFAULT_HOTKEY)
-                self.config.hotkey = DEFAULT_HOTKEY
+                self.hotkey.register(combo)
+            except Exception as exc:
+                last_error = exc
+                log.warning("Не удалось зарегистрировать %s: %s", combo, exc)
+                continue
+            if combo != self.config.hotkey:
+                self.config.hotkey = combo
                 self._save_config()
-            except Exception:
-                self.status_badge.set("Горячая клавиша недоступна", RED)
                 self.footer_label.configure(
-                    text="Глобальная клавиша занята. Запись доступна кнопкой."
+                    text=f"Комбинация была занята — назначена {format_hotkey(combo)}."
                 )
-            else:
-                self.footer_label.configure(
-                    text="Выбранная комбинация занята — восстановлена стандартная."
-                )
+            break
+        else:
+            log.error("Все горячие клавиши заняты: %s", last_error)
+            self.status_badge.set("Горячая клавиша недоступна", RED)
+            self.footer_label.configure(
+                text="Все предложенные комбинации заняты. Запись доступна кнопкой."
+            )
         if self.hotkey.combo:
             self.key_label.configure(text=format_hotkey(self.config.hotkey), fg=TEXT)
         else:

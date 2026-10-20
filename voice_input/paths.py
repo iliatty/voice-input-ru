@@ -10,7 +10,7 @@ from pathlib import Path
 
 APP_NAME = "VoiceInputRU"
 APP_TITLE = "Голосовой ввод"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 MODEL_FOLDER_NAME = "faster-whisper-small"
 
 
